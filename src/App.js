@@ -1337,6 +1337,18 @@ const ImplantacionCard = ({ proj, setProjects, municipios }) => {
     return autoPositionHabs(ambInit, frente, fondo, retFr, retFo, retLat);
   });
 
+  // Sync habs when ambientes change (e.g. from AsistenteCard "Aplicar")
+  const ambIdsRef = useRef(ambInit.map(a => a.id).join(","));
+  useEffect(() => {
+    const newIds = (proj.ambientes || []).map(a => a.id).join(",");
+    if (newIds !== ambIdsRef.current && newIds.length > 0) {
+      ambIdsRef.current = newIds;
+      const repositioned = autoPositionHabs(proj.ambientes, frente, fondo, retFr, retFo, retLat);
+      setHabs(repositioned);
+      setProjects(prev => prev.map(p => p.id === proj.id ? { ...p, implantacion_habs: repositioned } : p));
+    }
+  }, [proj.ambientes, proj.id, frente, fondo, retFr, retFo, retLat, setProjects]);
+
   function autoPositionHabs(ambs, fr, fo, rFr, rFo, rLat) {
     const buildX = rLat + 0.15;
     const buildY = rFr + 0.15;
@@ -1839,9 +1851,9 @@ Reglas importantes:
     }
   };
 
-  const aplicar = () => {
-    if (!respuesta?.ambientes) return;
-    const nuevosAmb = respuesta.ambientes.map((a, i) => ({
+  const buildAmbientes = () => {
+    if (!respuesta?.ambientes) return null;
+    return respuesta.ambientes.map((a, i) => ({
       id: Date.now() + i,
       nombre: a.nombre,
       tipo: a.tipo,
@@ -1852,8 +1864,28 @@ Reglas importantes:
       planta: a.planta,
       tipo_sup: a.tipo_sup,
     }));
+  };
+
+  const aplicar = () => {
+    const nuevosAmb = buildAmbientes();
+    if (!nuevosAmb) return;
     setProjects(prev => prev.map(p =>
       p.id === proj.id ? { ...p, ambientes: nuevosAmb, brief: input } : p
+    ));
+    setAplicado(true);
+  };
+
+  const disenarTodo = async () => {
+    // Step 1: Interpret brief (if not already done)
+    if (!respuesta) {
+      await interpretar();
+      return; // After interpretar sets respuesta, user clicks again
+    }
+    // Step 2: Apply ambientes + clear implantacion_habs so ImplantacionCard re-syncs
+    const nuevosAmb = buildAmbientes();
+    if (!nuevosAmb) return;
+    setProjects(prev => prev.map(p =>
+      p.id === proj.id ? { ...p, ambientes: nuevosAmb, brief: input, implantacion_habs: null } : p
     ));
     setAplicado(true);
   };
@@ -1888,11 +1920,21 @@ Reglas importantes:
         }}
       />
 
+      {!supLote && input.trim() && (
+        <div style={{ padding: "8px 12px", background: "#f59e0b11", border: "1px solid #f59e0b33", borderRadius: 7, color: "#fbbf24", fontSize: 12, marginBottom: 10 }}>
+          ⚠ Cargá el frente, fondo y superficie del lote antes de interpretar para que la IA pueda verificar FOS/FOT y respetar retiros.
+        </div>
+      )}
+      {!getApiKey() && input.trim() && (
+        <div style={{ padding: "8px 12px", background: "#ef444411", border: "1px solid #ef444433", borderRadius: 7, color: "#f87171", fontSize: 12, marginBottom: 10 }}>
+          🔑 Configurá tu API Key en ⚙️ Configuración para usar el asistente.
+        </div>
+      )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: respuesta ? 16 : 0 }}>
         <div style={{ color: "#334155", fontSize: 11 }}>
           {supLote > 0 ? `Lote: ${supLote} m² · FOS máx: ${fosLim} · FOT máx: ${fotLim}` : "Cargá el lote para verificar FOS/FOT automáticamente"}
         </div>
-        <Btn onClick={interpretar} disabled={loading || !input.trim()}>
+        <Btn onClick={interpretar} disabled={loading || !input.trim() || !getApiKey()}>
           {loading ? "⏳ Interpretando..." : "🤖 Interpretar pedido"}
         </Btn>
       </div>
@@ -1973,14 +2015,17 @@ Reglas importantes:
             </table>
           </div>
 
-          {/* Botón aplicar */}
+          {/* Botones aplicar */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             {aplicado
-              ? <div style={{ color: "#22c55e", fontSize: 13, fontWeight: 700 }}>✅ Ambientes aplicados al proyecto</div>
+              ? <div style={{ color: "#22c55e", fontSize: 13, fontWeight: 700 }}>✅ Ambientes aplicados — la implantación se actualizó automáticamente</div>
               : <div style={{ color: "#475569", fontSize: 12 }}>Revisá los ambientes antes de aplicar. Podés modificarlos después.</div>
             }
             {!aplicado && (
-              <Btn variant="green" onClick={aplicar}>✅ Aplicar al proyecto</Btn>
+              <div style={{ display: "flex", gap: 8 }}>
+                <Btn variant="ghost" onClick={aplicar}>✅ Solo aplicar</Btn>
+                <Btn variant="green" onClick={disenarTodo}>🚀 Diseñar todo</Btn>
+              </div>
             )}
           </div>
         </div>
