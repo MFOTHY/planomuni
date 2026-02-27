@@ -1,15 +1,15 @@
 {
   "files": {
     "main.css": "/planomuni/static/css/main.f5b21c72.css",
-    "main.js": "/planomuni/static/js/main.5f999acd.js",
+    "main.js": "/planomuni/static/js/main.a7ade37c.js",
     "static/js/453.b1e51c57.chunk.js": "/planomuni/static/js/453.b1e51c57.chunk.js",
     "index.html": "/planomuni/index.html",
     "main.f5b21c72.css.map": "/planomuni/static/css/main.f5b21c72.css.map",
-    "main.5f999acd.js.map": "/planomuni/static/js/main.5f999acd.js.map",
+    "main.a7ade37c.js.map": "/planomuni/static/js/main.a7ade37c.js.map",
     "453.b1e51c57.chunk.js.map": "/planomuni/static/js/453.b1e51c57.chunk.js.map"
   },
   "entrypoints": [
     "static/css/main.f5b21c72.css",
-    "static/js/main.5f999acd.js"
+    "static/js/main.a7ade37c.js"
   ]
 }
