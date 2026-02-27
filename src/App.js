@@ -1719,6 +1719,266 @@ El array completo:`;
   );
 };
 
+// ── ASISTENTE DE DISEÑO ───────────────────────────────────────────────────────
+// Interpreta descripción libre del proyecto y auto-completa ambientes + planilla
+
+const AsistenteCard = ({ proj, setProjects, municipios }) => {
+  const muni   = municipios[proj.municipio];
+  const barrio = proj.barrio ? muni?.barrios[proj.barrio] : null;
+  const zona   = muni?.zonas?.find(z => z.nombre === proj.zona);
+  const lote   = proj.lote || {};
+
+  const [input, setInput]     = useState("");
+  const [loading, setLoading] = useState(false);
+  const [respuesta, setRespuesta] = useState(null);
+  const [error, setError]     = useState("");
+  const [aplicado, setAplicado] = useState(false);
+
+  const fosLim = barrio?.fos_max || zona?.fos || "—";
+  const fotLim = barrio?.fot_max || zona?.fot || "—";
+  const supLote = parseFloat(lote.sup_total) || 0;
+
+  const interpretar = async () => {
+    if (!input.trim()) return;
+    setLoading(true); setError(""); setRespuesta(null); setAplicado(false);
+
+    const normativa = `
+Municipio: ${muni?.nombre || "—"}
+Barrio: ${barrio?.nombre || "Sin barrio cerrado"}
+FOS máximo: ${fosLim}
+FOT máximo: ${fotLim}
+Superficie del lote: ${supLote || "no cargada"} m²
+Retiro frente: ${barrio?.retiro_frente || "—"} m
+Retiro fondo: ${barrio?.retiro_fondo || "—"} m
+Retiro lateral: ${barrio?.retiro_lateral || "—"} m
+Coef. iluminación: ${muni?.coef_ilum || "L/8"}
+Coef. ventilación: ${muni?.coef_vent || "L/3"}
+Altura máxima: ${barrio?.altura_max || muni?.altura_max || "—"}
+Categorías de locales:
+- 1° categoría (dormir, estar, comedor, estudio): iluminación L/8, ventilación L/3, altura mín. 2.60m
+- 2° categoría (cocina, baño, lavadero, vestidor, garage): ventilación puede ser por conducto, altura mín. 2.40m
+- 3° categoría (hall, circulación, depósito, toilette): sin requisito de iluminación ni ventilación natural`;
+
+    const prompt = `Sos un arquitecto experto en normativa municipal de Argentina (GBA, Escobar y Tigre).
+Tu tarea es interpretar el pedido del cliente y generar la lista completa de ambientes para el proyecto, respetando la normativa.
+
+NORMATIVA DEL PROYECTO:
+${normativa}
+
+PEDIDO DEL CLIENTE (puede ser audio transcripto o texto libre — interpretá con criterio arquitectónico):
+"""
+${input}
+"""
+
+Respondé ÚNICAMENTE con un objeto JSON, sin texto antes ni después, sin backticks.
+Formato exacto:
+{
+  "interpretacion": "<resumen breve de lo que entendiste, 2-3 oraciones>",
+  "plantas": ["PB"] o ["PB", "PP"] según corresponda,
+  "ambientes": [
+    {
+      "nombre": "<nombre del ambiente>",
+      "tipo": "<id válido de la lista>",
+      "superficie": <número en m²>,
+      "sup_ilum": <superficie de iluminación en m², o null si no aplica>,
+      "sup_vent": <superficie de ventilación en m², o null si no aplica>,
+      "altura": <altura libre en metros, mínimo según categoría>,
+      "planta": "PB" o "PP",
+      "tipo_sup": "cubierta" o "semicubierta" o "descubierta",
+      "justificacion": "<por qué esa superficie, 1 línea>"
+    }
+  ],
+  "alertas": [
+    "<alerta de normativa si hay algo que revisar>"
+  ],
+  "superficie_cubierta_total": <suma de superficies cubiertas>,
+  "fos_estimado": <sup_cubierta / sup_lote, o null si no hay lote>,
+  "fot_estimado": <sup_cubierta + sup_semi*0.5 / sup_lote, o null>
+}
+
+Tipos válidos: dormitorio, dormPpal, estar, comedor, estudio, cocina, bano, lavadero, vestidor, garage, hall, toilette, deposito, semicub, pileta
+
+Reglas importantes:
+- Superficies mínimas: dormitorio 9m², dormPpal 12m², estar/living 16m², comedor 10m², cocina 6m², baño 3m², garage 18m²
+- Para cat 1: sup_ilum = superficie / 8, sup_vent = superficie / 3
+- Para cat 2 con conducto: sup_ilum = superficie / 8, sup_vent = null
+- Para cat 3: sup_ilum = null, sup_vent = null
+- Respetá el FOS: si sup_lote está cargada, no superes el límite
+- Siempre incluir al menos 1 hall/circulación
+- Si pide planta alta, separar ambientes por planta`;
+
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 2000,
+          messages: [{ role: "user", content: prompt }]
+        })
+      });
+      const data = await res.json();
+      const txt = data.content?.find(b => b.type === "text")?.text || "";
+      const clean = txt.replace(/```json|```/g, "").trim();
+      const parsed = JSON.parse(clean);
+      setRespuesta(parsed);
+    } catch (e) {
+      setError("No se pudo interpretar el pedido. Intentá con más detalle.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const aplicar = () => {
+    if (!respuesta?.ambientes) return;
+    const nuevosAmb = respuesta.ambientes.map((a, i) => ({
+      id: Date.now() + i,
+      nombre: a.nombre,
+      tipo: a.tipo,
+      superficie: String(a.superficie),
+      sup_ilum: a.sup_ilum ? String(a.sup_ilum) : "",
+      sup_vent: a.sup_vent ? String(a.sup_vent) : "",
+      altura: String(a.altura),
+      planta: a.planta,
+      tipo_sup: a.tipo_sup,
+    }));
+    setProjects(prev => prev.map(p =>
+      p.id === proj.id ? { ...p, ambientes: nuevosAmb, brief: input } : p
+    ));
+    setAplicado(true);
+  };
+
+  const alertColor = (a) => {
+    if (a.toLowerCase().includes("excede") || a.toLowerCase().includes("supera") || a.toLowerCase().includes("insuficiente")) return "#ef4444";
+    if (a.toLowerCase().includes("revisar") || a.toLowerCase().includes("verificar") || a.toLowerCase().includes("atención")) return "#f59e0b";
+    return "#3b82f6";
+  };
+
+  return (
+    <Card style={{ marginBottom: 16, border: "1px solid #3b82f633" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+        <span style={{ fontSize: 18 }}>🤖</span>
+        <div>
+          <div style={{ color: "#e2e8f0", fontWeight: 800, fontSize: 14 }}>Asistente de diseño</div>
+          <div style={{ color: "#475569", fontSize: 11 }}>Describí el proyecto y auto-completa ambientes + planilla</div>
+        </div>
+      </div>
+
+      {/* Input */}
+      <textarea
+        value={input}
+        onChange={e => setInput(e.target.value)}
+        placeholder={`Describí qué querés construir. Puede ser texto o audio transcripto. Ejemplos:\n\n"Casa planta baja, tres dormitorios uno en suite con vestidor, cocina comedor integrada con isla, lavadero separado, garage doble, galería cubierta atrás, patio con pileta"\n\n"Planta baja y primera. Abajo: living amplio, comedor, cocina semi abierta, toilette, lavadero. Arriba: dormitorio principal en suite, dos dormitorios más, baño compartido, estudio pequeño"`}
+        style={{
+          width: "100%", minHeight: 120, background: "#0f1724",
+          border: "1px solid #2d3f5a", borderRadius: 10,
+          padding: "12px 14px", color: "#e2e8f0", fontSize: 13,
+          lineHeight: 1.6, resize: "vertical", outline: "none",
+          boxSizing: "border-box", fontFamily: "inherit", marginBottom: 12,
+        }}
+      />
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: respuesta ? 16 : 0 }}>
+        <div style={{ color: "#334155", fontSize: 11 }}>
+          {supLote > 0 ? `Lote: ${supLote} m² · FOS máx: ${fosLim} · FOT máx: ${fotLim}` : "Cargá el lote para verificar FOS/FOT automáticamente"}
+        </div>
+        <Btn onClick={interpretar} disabled={loading || !input.trim()}>
+          {loading ? "⏳ Interpretando..." : "🤖 Interpretar pedido"}
+        </Btn>
+      </div>
+
+      {error && (
+        <div style={{ padding: "8px 12px", background: "#ef444411", border: "1px solid #ef444433", borderRadius: 7, color: "#f87171", fontSize: 12, marginTop: 10 }}>
+          {error}
+        </div>
+      )}
+
+      {/* Resultado */}
+      {respuesta && (
+        <div>
+          {/* Interpretación */}
+          <div style={{ background: "#3b82f611", border: "1px solid #3b82f633", borderRadius: 8, padding: "10px 14px", marginBottom: 14 }}>
+            <div style={{ color: "#93c5fd", fontSize: 11, fontWeight: 700, textTransform: "uppercase", marginBottom: 4 }}>✓ Interpretación</div>
+            <div style={{ color: "#e2e8f0", fontSize: 13, lineHeight: 1.5 }}>{respuesta.interpretacion}</div>
+            <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
+              {respuesta.superficie_cubierta_total > 0 && (
+                <span style={{ color: "#475569", fontSize: 11 }}>Sup. cubierta: <span style={{ color: "#e2e8f0", fontWeight: 700 }}>{respuesta.superficie_cubierta_total} m²</span></span>
+              )}
+              {respuesta.fos_estimado && (
+                <span style={{ color: "#475569", fontSize: 11 }}>FOS estimado: <span style={{ color: parseFloat(respuesta.fos_estimado) > parseFloat(fosLim) ? "#ef4444" : "#22c55e", fontWeight: 700 }}>{respuesta.fos_estimado}</span></span>
+              )}
+              {respuesta.fot_estimado && (
+                <span style={{ color: "#475569", fontSize: 11 }}>FOT estimado: <span style={{ color: parseFloat(respuesta.fot_estimado) > parseFloat(fotLim) ? "#ef4444" : "#22c55e", fontWeight: 700 }}>{respuesta.fot_estimado}</span></span>
+              )}
+            </div>
+          </div>
+
+          {/* Alertas normativa */}
+          {respuesta.alertas?.length > 0 && (
+            <div style={{ marginBottom: 14 }}>
+              {respuesta.alertas.map((a, i) => (
+                <div key={i} style={{ display: "flex", gap: 8, padding: "7px 12px", background: alertColor(a) + "11", border: "1px solid " + alertColor(a) + "33", borderRadius: 7, marginBottom: 5 }}>
+                  <span style={{ color: alertColor(a), fontWeight: 900, flexShrink: 0 }}>⚠</span>
+                  <span style={{ color: "#e2e8f0", fontSize: 12 }}>{a}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Lista de ambientes */}
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 700, textTransform: "uppercase", marginBottom: 8 }}>
+              Ambientes propuestos ({respuesta.ambientes?.length})
+            </div>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+              <thead>
+                <tr style={{ borderBottom: "1px solid #1a2640" }}>
+                  {["Ambiente", "Planta", "Sup.", "Ilum. mín.", "Vent. mín.", "Altura"].map(h => (
+                    <th key={h} style={{ padding: "5px 8px", color: "#334155", fontSize: 9, fontWeight: 700, textTransform: "uppercase", textAlign: "left" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {respuesta.ambientes?.map((a, i) => {
+                  const tipo = AMBIENTES_TIPOS.find(t => t.id === a.tipo);
+                  const catColor = tipo?.cat === 1 ? "#3b82f6" : tipo?.cat === 2 ? "#8b5cf6" : "#475569";
+                  return (
+                    <tr key={i} style={{ borderBottom: "1px solid #0f1724" }}>
+                      <td style={{ padding: "7px 8px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <div style={{ width: 6, height: 6, borderRadius: "50%", background: catColor, flexShrink: 0 }} />
+                          <span style={{ color: "#e2e8f0", fontWeight: 600 }}>{a.nombre}</span>
+                        </div>
+                        {a.justificacion && <div style={{ color: "#334155", fontSize: 9, marginTop: 2, paddingLeft: 12 }}>{a.justificacion}</div>}
+                      </td>
+                      <td style={{ padding: "7px 8px", color: "#475569" }}>{a.planta}</td>
+                      <td style={{ padding: "7px 8px", color: "#94a3b8", fontWeight: 700 }}>{a.superficie} m²</td>
+                      <td style={{ padding: "7px 8px", color: "#475569" }}>{a.sup_ilum ? a.sup_ilum + " m²" : "—"}</td>
+                      <td style={{ padding: "7px 8px", color: "#475569" }}>{a.sup_vent ? a.sup_vent + " m²" : "—"}</td>
+                      <td style={{ padding: "7px 8px", color: "#475569" }}>{a.altura} m</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Botón aplicar */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            {aplicado
+              ? <div style={{ color: "#22c55e", fontSize: 13, fontWeight: 700 }}>✅ Ambientes aplicados al proyecto</div>
+              : <div style={{ color: "#475569", fontSize: 12 }}>Revisá los ambientes antes de aplicar. Podés modificarlos después.</div>
+            }
+            {!aplicado && (
+              <Btn variant="green" onClick={aplicar}>✅ Aplicar al proyecto</Btn>
+            )}
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+};
+
 // ── SIDEBAR ───────────────────────────────────────────────────────────────────
 const Sidebar = ({ view, setView, onExport, onImport, isMobile, sidebarOpen, onCloseSidebar }) => {
   if (isMobile && !sidebarOpen) return null;
@@ -1943,6 +2203,7 @@ const HomeView = ({ projects, setProjects, municipios, setView, onOpenObra, isMo
                 </div>
               )}
             </Card>
+            <AsistenteCard proj={proj} setProjects={setProjects} municipios={municipios} />
             <LoteCard proj={proj} setProjects={setProjects} />
             <ImplantacionCard proj={proj} setProjects={setProjects} municipios={municipios} />
             <VerificacionCard proj={proj} municipios={municipios} />
