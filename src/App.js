@@ -387,6 +387,7 @@ const Sidebar = ({ view, setView }) => (
       {[
         { id: "home",      label: "Proyectos",   icon: "📁" },
         { id: "nuevo",     label: "Nuevo plano", icon: "＋" },
+        { id: "obras",     label: "Dir. de Obra", icon: "🏗" },
         { id: "normativa", label: "Normativa",   icon: "🗺️" },
       ].map(item => (
         <button key={item.id} onClick={() => setView(item.id)} style={{
@@ -1460,6 +1461,80 @@ const ObraView = ({ project, setProjects, onBack }) => {
   );
 };
 
+// ── OBRAS LIST VIEW ──────────────────────────────────────────────────────────
+const ObrasListView = ({ projects, setProjects, onOpenObra }) => {
+  const obrasProjects = projects.filter(p => p.obra?.activo);
+  return (
+    <div style={{ flex: 1, overflow: "auto", padding: 28 }}>
+      <div style={{ marginBottom: 22 }}>
+        <h1 style={{ color: "#e2e8f0", fontSize: 21, fontWeight: 900, margin: 0, letterSpacing: "-0.03em" }}>🏗 Dirección de Obra</h1>
+        <p style={{ color: "#334155", margin: "3px 0 0", fontSize: 12 }}>{obrasProjects.length} proyecto{obrasProjects.length !== 1 ? "s" : ""} con dirección de obra activa</p>
+      </div>
+      {obrasProjects.length === 0 && (
+        <Card>
+          <p style={{ color: "#475569", fontSize: 13, margin: 0 }}>No hay proyectos con dirección de obra activada. Activá la dirección de obra desde el detalle de un proyecto en la vista de Proyectos.</p>
+        </Card>
+      )}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+        {obrasProjects.map(p => {
+          const tipo = getTipo(p.tipo);
+          const allT = OBRA_ETAPAS.flatMap(et => et.tareas);
+          const totalT = allT.length;
+          const doneT = allT.filter(t => p.obra.tareas[t.id]?.estado === "completado").length;
+          const pct = totalT ? Math.round(doneT / totalT * 100) : 0;
+          const barColor = pct === 100 ? "#22c55e" : pct > 50 ? "#3b82f6" : pct > 20 ? "#f59e0b" : "#64748b";
+          const proximoHito = allT.find(t => t.hito && p.obra.tareas[t.id]?.estado !== "completado");
+          const totalEjUsd = p.obra.costos.rubros.reduce((s, r) => s + (r.ejecutado_usd || 0), 0);
+          const totalPresUsd = p.obra.costos.presupuesto_usd || 0;
+          // Current stage
+          const currentEtapa = OBRA_ETAPAS.find(et => et.tareas.some(t => p.obra.tareas[t.id]?.estado !== "completado"));
+          return (
+            <div key={p.id} onClick={() => onOpenObra(p.id)}
+              style={{ background: "#111d2e", border: "1px solid #1a2640", borderRadius: 12, padding: 20, cursor: "pointer", transition: "border-color .2s" }}
+              onMouseEnter={e => e.currentTarget.style.borderColor = "#3b82f6"}
+              onMouseLeave={e => e.currentTarget.style.borderColor = "#1a2640"}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                <Dot color={tipo.color} size={9} />
+                <span style={{ color: "#e2e8f0", fontWeight: 700, fontSize: 14, flex: 1 }}>{p.nombre}</span>
+                <Badge color={tipo.color}>{tipo.label}</Badge>
+              </div>
+              {/* progress */}
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+                <span style={{ color: "#475569", fontSize: 10 }}>{currentEtapa ? currentEtapa.nombre : "Completado"}</span>
+                <span style={{ color: barColor, fontSize: 12, fontWeight: 800 }}>{pct}%</span>
+              </div>
+              <div style={{ background: "#1e2d42", borderRadius: 4, height: 6, overflow: "hidden", marginBottom: 12 }}>
+                <div style={{ width: pct + "%", height: "100%", background: barColor, borderRadius: 4 }} />
+              </div>
+              {/* stats row */}
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <div style={{ background: "#0d1624", borderRadius: 6, padding: "6px 10px", flex: 1, minWidth: 80 }}>
+                  <div style={{ color: "#334155", fontSize: 9, fontWeight: 700, textTransform: "uppercase" }}>Tareas</div>
+                  <div style={{ color: "#94a3b8", fontSize: 13, fontWeight: 800 }}>{doneT}/{totalT}</div>
+                </div>
+                <div style={{ background: "#0d1624", borderRadius: 6, padding: "6px 10px", flex: 1, minWidth: 80 }}>
+                  <div style={{ color: "#334155", fontSize: 9, fontWeight: 700, textTransform: "uppercase" }}>Presup. USD</div>
+                  <div style={{ color: "#22c55e", fontSize: 13, fontWeight: 800 }}>U$D {totalEjUsd.toLocaleString("es-AR")} <span style={{ color: "#475569", fontWeight: 400 }}>/ {totalPresUsd.toLocaleString("es-AR")}</span></div>
+                </div>
+                <div style={{ background: "#0d1624", borderRadius: 6, padding: "6px 10px", flex: 1, minWidth: 80 }}>
+                  <div style={{ color: "#334155", fontSize: 9, fontWeight: 700, textTransform: "uppercase" }}>Próximo hito</div>
+                  <div style={{ color: "#f59e0b", fontSize: 11, fontWeight: 700 }}>{proximoHito ? "♦ " + proximoHito.nombre : "—"}</div>
+                </div>
+              </div>
+              {/* contratistas count */}
+              <div style={{ marginTop: 8, display: "flex", gap: 6 }}>
+                <Badge color="#3b82f6">{p.obra.contratistas.filter(c => c.activo).length} contratistas activos</Badge>
+                <Badge color="#475569">{p.obra.seguimiento.length} entradas seguimiento</Badge>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 // ── APP ───────────────────────────────────────────────────────────────────────
 export default function App() {
   const [view,       setView]       = useState("home");
@@ -1497,6 +1572,8 @@ export default function App() {
       <Sidebar view={view} setView={(v) => { setView(v); setObraProjectId(null); }} />
       {view === "home" && !obraProject && <HomeView projects={projects} setProjects={setProjects} municipios={municipios} setView={setView} onOpenObra={(pid) => setObraProjectId(pid)} />}
       {view === "home" && obraProject && obraProject.obra?.activo && <ObraView project={obraProject} setProjects={setProjects} onBack={() => setObraProjectId(null)} />}
+      {view === "obras" && !obraProject && <ObrasListView projects={projects} setProjects={setProjects} onOpenObra={(pid) => setObraProjectId(pid)} />}
+      {view === "obras" && obraProject && obraProject.obra?.activo && <ObraView project={obraProject} setProjects={setProjects} onBack={() => setObraProjectId(null)} />}
       {view === "nuevo"     && <NuevoView     municipios={municipios} setView={setView} setProjects={setProjects} />}
       {view === "normativa" && <NormativaView municipios={municipios} setMunicipios={setMunicipios} />}
     </div>
