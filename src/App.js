@@ -1184,6 +1184,541 @@ const PlanillaCard = ({ proj, municipios }) => {
   );
 };
 
+// ── DXF GENERATOR ────────────────────────────────────────────────────────────
+const generarDXF = (proj, municipios, habs) => {
+  const lote   = proj.lote || {};
+  const muni   = municipios[proj.municipio];
+  const barrio = proj.barrio ? muni?.barrios[proj.barrio] : null;
+  const frente = parseFloat(lote.frente) || 15;
+  const fondo  = parseFloat(lote.fondo)  || 30;
+  const retFr  = barrio ? parseFloat(barrio.retiro_frente)  : 3;
+  const retFo  = barrio ? parseFloat(barrio.retiro_fondo)   : 5;
+  const retLat = barrio ? parseFloat(barrio.retiro_lateral) : 2;
+  const supLote= parseFloat(lote.sup_total) || (frente * fondo);
+  const supCub = habs.filter(h => h.tipo_sup !== "semicubierta" && h.tipo_sup !== "descubierta")
+                     .reduce((s,h) => s + h.w * h.h, 0);
+  const supSemi= habs.filter(h => h.tipo_sup === "semicubierta")
+                     .reduce((s,h) => s + h.w * h.h, 0);
+  const fosReal= supLote > 0 ? (supCub / supLote).toFixed(3) : "—";
+  const fotReal= supLote > 0 ? ((supCub + supSemi * 0.5) / supLote).toFixed(3) : "—";
+
+  let entities = "";
+
+  const line = (x1, y1, x2, y2, layer, color = 7) =>
+    `0\nLINE\n8\n${layer}\n62\n${color}\n10\n${(+x1).toFixed(4)}\n20\n${(+y1).toFixed(4)}\n30\n0.0\n11\n${(+x2).toFixed(4)}\n21\n${(+y2).toFixed(4)}\n31\n0.0\n`;
+
+  const rect = (x, y, w, h, layer, color = 7) =>
+    line(x, y, x+w, y, layer, color) +
+    line(x+w, y, x+w, y+h, layer, color) +
+    line(x+w, y+h, x, y+h, layer, color) +
+    line(x, y+h, x, y, layer, color);
+
+  const text = (x, y, h, str, layer, color = 7) =>
+    `0\nTEXT\n8\n${layer}\n62\n${color}\n10\n${(+x).toFixed(4)}\n20\n${(+y).toFixed(4)}\n30\n0.0\n40\n${h}\n1\n${str}\n`;
+
+  // ── LOTE ──
+  entities += rect(0, 0, frente, fondo, "LOTE", 7);
+
+  // ── RETIROS ──
+  entities += line(retLat, retFr, frente - retLat, retFr, "RETIROS", 8);
+  entities += line(retLat, fondo - retFo, frente - retLat, fondo - retFo, "RETIROS", 8);
+  entities += line(retLat, retFr, retLat, fondo - retFo, "RETIROS", 8);
+  entities += line(frente - retLat, retFr, frente - retLat, fondo - retFo, "RETIROS", 8);
+  entities += text(retLat + 0.2, retFr + 0.2, 0.5, `RET. FRENTE ${retFr}m`, "RETIROS", 8);
+  entities += text(retLat + 0.2, fondo - retFo + 0.2, 0.5, `RET. FONDO ${retFo}m`, "RETIROS", 8);
+
+  // ── MUROS DE HABITACIONES ──
+  habs.forEach(h => {
+    const amb = AMBIENTES_TIPOS.find(a => a.id === h.tipo);
+    const col = amb?.cat === 1 ? 3 : amb?.cat === 2 ? 5 : 8;
+    entities += rect(h.x, h.y, h.w, h.h, "MUROS", col);
+    entities += text(h.x + 0.2, h.y + h.h / 2 + 0.2, 0.5, h.nombre, "TEXTO_LOCALES", col);
+    entities += text(h.x + 0.2, h.y + h.h / 2 - 0.5, 0.4, `${(h.w * h.h).toFixed(1)} m2`, "TEXTO_LOCALES", 8);
+    if (h.tipo_sup === "semicubierta") {
+      entities += line(h.x, h.y, h.x + h.w, h.y + h.h, "MUROS", 9);
+    }
+  });
+
+  // ── COTAS LOTE ──
+  entities += line(0, -3, frente, -3, "COTAS", 3);
+  entities += line(0, -2.5, 0, -3.5, "COTAS", 3);
+  entities += line(frente, -2.5, frente, -3.5, "COTAS", 3);
+  entities += text(frente / 2 - 1, -4.5, 0.8, `FRENTE: ${frente} m`, "COTAS", 3);
+  entities += line(frente + 2, 0, frente + 2, fondo, "COTAS", 3);
+  entities += line(frente + 1.5, 0, frente + 2.5, 0, "COTAS", 3);
+  entities += line(frente + 1.5, fondo, frente + 2.5, fondo, "COTAS", 3);
+  entities += text(frente + 3, fondo / 2, 0.8, `FONDO: ${fondo} m`, "COTAS", 3);
+  entities += text(0.5, -6, 0.7, `SUP. LOTE: ${supLote} m2   FOS: ${fosReal}   FOT: ${fotReal}`, "COTAS", 3);
+
+  // ── NORTE ──
+  entities += line(frente + 6, fondo - 3, frente + 6, fondo, "NORTE", 7);
+  entities += text(frente + 5.5, fondo + 0.5, 1.2, "N", "NORTE", 7);
+  entities += line(frente + 5.5, fondo, frente + 6.5, fondo, "NORTE", 7);
+
+  // ── CARATULA ──
+  const cx = 0;
+  const cy = fondo + 8;
+  const cw = Math.max(frente + 10, 30);
+  const ch = 22;
+  entities += rect(cx, cy, cw, ch, "CARATULA", 7);
+  entities += line(cx, cy + 6, cx + cw, cy + 6, "CARATULA", 7);
+  entities += line(cx, cy + 11, cx + cw, cy + 11, "CARATULA", 7);
+  entities += line(cx, cy + 16, cx + cw, cy + 16, "CARATULA", 7);
+  entities += line(cx + cw * 0.6, cy, cx + cw * 0.6, cy + 16, "CARATULA", 7);
+  entities += text(cx + 0.5, cy + ch - 2, 1.5, proj.nombre || "PROYECTO", "CARATULA", 7);
+  entities += text(cx + 0.5, cy + 14, 0.6, "MUNICIPIO:", "CARATULA", 8);
+  entities += text(cx + 0.5, cy + 12.5, 0.9, muni?.nombre?.toUpperCase() || "—", "CARATULA", 7);
+  if (barrio) entities += text(cx + 0.5, cy + 11.5, 0.7, barrio.nombre, "CARATULA", 8);
+  entities += text(cx + 0.5, cy + 9.5, 0.6, "PROPIETARIO:", "CARATULA", 8);
+  entities += text(cx + 0.5, cy + 8, 0.9, proj.propietario || "—", "CARATULA", 7);
+  entities += text(cx + 0.5, cy + 4.5, 0.6, "CUADRO DE SUPERFICIES:", "CARATULA", 8);
+  entities += text(cx + 0.5, cy + 3.2, 0.8, `Cubierta: ${supCub.toFixed(2)} m2   Semicubierta: ${supSemi.toFixed(2)} m2`, "CARATULA", 7);
+  entities += text(cx + 0.5, cy + 1.8, 0.8, `FOS: ${fosReal}   FOT: ${fotReal}   Escala 1:100`, "CARATULA", 7);
+  entities += text(cx + cw * 0.62, cy + 14, 0.6, "PROFESIONAL:", "CARATULA", 8);
+  entities += text(cx + cw * 0.62, cy + 12.5, 1.0, "Arq. Julieta Vento", "CARATULA", 7);
+  entities += text(cx + cw * 0.62, cy + 11, 0.8, "MP 35670", "CARATULA", 7);
+  if (muni?.matricula_muni) entities += text(cx + cw * 0.62, cy + 9.5, 0.8, `MM Escobar ${muni.matricula_muni}`, "CARATULA", 7);
+  entities += text(cx + cw * 0.62, cy + 3, 0.6, "FIRMA Y SELLO:", "CARATULA", 8);
+  entities += line(cx + cw * 0.62, cy + 1.5, cx + cw - 0.5, cy + 1.5, "CARATULA", 7);
+
+  // ── LAYER DEFINITIONS ──
+  const layerDefs = [
+    { name: "LOTE",          color: 7 },
+    { name: "RETIROS",       color: 8 },
+    { name: "MUROS",         color: 3 },
+    { name: "COTAS",         color: 3 },
+    { name: "TEXTO_LOCALES", color: 5 },
+    { name: "CARATULA",      color: 7 },
+    { name: "NORTE",         color: 7 },
+  ].map(l => `0\nLAYER\n2\n${l.name}\n70\n0\n62\n${l.color}\n6\nCONTINUOUS\n`).join("");
+
+  return `0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1015\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n` +
+    `0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLAYER\n70\n7\n${layerDefs}0\nENDTAB\n0\nENDSEC\n` +
+    `0\nSECTION\n2\nENTITIES\n${entities}0\nENDSEC\n0\nEOF\n`;
+};
+
+// ── BRIEF + IMPLANTACION CARD ─────────────────────────────────────────────────
+const ImplantacionCard = ({ proj, setProjects, municipios }) => {
+  const lote    = proj.lote      || {};
+  const ambInit = proj.ambientes || [];
+  const muni    = municipios[proj.municipio];
+  const barrio  = proj.barrio ? muni?.barrios[proj.barrio] : null;
+
+  const frente = parseFloat(lote.frente) || 0;
+  const fondo  = parseFloat(lote.fondo)  || 0;
+  const retFr  = barrio ? parseFloat(barrio.retiro_frente)  : 3;
+  const retFo  = barrio ? parseFloat(barrio.retiro_fondo)   : 5;
+  const retLat = barrio ? parseFloat(barrio.retiro_lateral) : 2;
+
+  const CANVAS_W = 560;
+  const CANVAS_H = 440;
+  const PAD = 44;
+
+  const scaleX = frente > 0 ? (CANVAS_W - PAD * 2) / frente : 10;
+  const scaleY = fondo  > 0 ? (CANVAS_H - PAD * 2) / fondo  : 10;
+  const scale  = Math.min(scaleX, scaleY);
+
+  const toSX = (v) => PAD + v * scale;
+  const toSY = (v) => PAD + (fondo - v) * scale;
+  const m2px = (m) => m * scale;
+
+  // ── Brief state ──
+  const [brief, setBrief] = useState(proj.brief || "");
+  const [briefGuardado, setBriefGuardado] = useState(proj.brief || "");
+
+  const saveBrief = (v) => {
+    setBrief(v);
+    setProjects(prev => prev.map(p => p.id === proj.id ? { ...p, brief: v } : p));
+  };
+
+  // ── Habitaciones state ──
+  const [habs, setHabs] = useState(() => {
+    if (proj.implantacion_habs) return proj.implantacion_habs;
+    return autoPositionHabs(ambInit, frente, fondo, retFr, retFo, retLat);
+  });
+
+  function autoPositionHabs(ambs, fr, fo, rFr, rFo, rLat) {
+    const buildX = rLat + 0.15;
+    const buildY = rFr + 0.15;
+    const buildW = fr - rLat * 2 - 0.3;
+    let curX = buildX, curY = buildY, rowH = 0;
+    return ambs.filter(a => a.tipo_sup !== "descubierta").map(a => {
+      const sup = parseFloat(a.superficie) || 9;
+      const w = Math.min(+(Math.sqrt(sup * 1.5)).toFixed(2), buildW * 0.55);
+      const h = +(sup / w).toFixed(2);
+      if (curX + w > fr - rLat) { curX = buildX; curY += rowH + 0.3; rowH = 0; }
+      const hx = +curX.toFixed(2), hy = +curY.toFixed(2);
+      curX += w + 0.25;
+      if (h > rowH) rowH = h;
+      return { id: a.id, nombre: a.nombre, tipo: a.tipo, w, h, x: hx, y: hy, tipo_sup: a.tipo_sup || "cubierta" };
+    });
+  }
+
+  const saveHabs = (newHabs) => {
+    setHabs(newHabs);
+    setProjects(prev => prev.map(p => p.id === proj.id ? { ...p, implantacion_habs: newHabs } : p));
+  };
+
+  const [dragging, setDragging] = useState(null);
+  const [selHab, setSelHab]     = useState(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError]   = useState("");
+  const [aiLog, setAiLog]       = useState("");
+  const [tab, setTab]           = useState("esquema");
+
+  const CAT_COLOR = (tipo) => {
+    const t = AMBIENTES_TIPOS.find(a => a.id === tipo);
+    return t?.cat === 1 ? "#3b82f6" : t?.cat === 2 ? "#8b5cf6" : "#475569";
+  };
+
+  // ── Drag ──
+  const onMouseDown = (e, id) => {
+    e.preventDefault();
+    const svg = e.currentTarget.closest("svg");
+    const pt = svg.createSVGPoint();
+    pt.x = e.clientX; pt.y = e.clientY;
+    const sp = pt.matrixTransform(svg.getScreenCTM().inverse());
+    const h = habs.find(h => h.id === id);
+    setDragging({ id, offX: sp.x - toSX(h.x), offY: sp.y - toSY(h.y + h.h) });
+    setSelHab(id);
+  };
+
+  const onMouseMove = (e) => {
+    if (!dragging) return;
+    const svg = e.currentTarget;
+    const pt = svg.createSVGPoint();
+    pt.x = e.clientX; pt.y = e.clientY;
+    const sp = pt.matrixTransform(svg.getScreenCTM().inverse());
+    const h = habs.find(h => h.id === dragging.id);
+    const newX = Math.max(0, Math.min(frente - h.w, (sp.x - dragging.offX - PAD) / scale));
+    const newY = Math.max(0, Math.min(fondo  - h.h, fondo - (sp.y - dragging.offY - PAD) / scale));
+    setHabs(prev => prev.map(x => x.id === dragging.id ? { ...x, x: +newX.toFixed(2), y: +newY.toFixed(2) } : x));
+  };
+
+  const onMouseUp = () => {
+    if (dragging) saveHabs(habs);
+    setDragging(null);
+  };
+
+  // ── Auto layout ──
+  const autoLayout = () => {
+    const newHabs = autoPositionHabs(
+      habs.map(h => ({ ...h, superficie: String(+(h.w * h.h).toFixed(1)) })),
+      frente, fondo, retFr, retFo, retLat
+    );
+    saveHabs(newHabs);
+  };
+
+  // ── IA Interpretar brief + distribuir ──
+  const interpretarIA = async () => {
+    setAiLoading(true); setAiError(""); setAiLog("Interpretando el brief...");
+
+    const normativa = {
+      municipio: muni?.nombre,
+      barrio: barrio?.nombre,
+      fos_max: barrio?.fos_max || muni?.zonas?.find(z => z.nombre === proj.zona)?.fos,
+      fot_max: barrio?.fot_max || muni?.zonas?.find(z => z.nombre === proj.zona)?.fot,
+      retiro_frente: retFr, retiro_fondo: retFo, retiro_lateral: retLat,
+      coef_ilum: muni?.coef_ilum, coef_vent: muni?.coef_vent,
+      altura_max: barrio?.altura_max || muni?.altura_max,
+    };
+
+    const ambientesExistentes = ambInit.map(a => ({
+      nombre: a.nombre, tipo: a.tipo, superficie: a.superficie, planta: a.planta, tipo_sup: a.tipo_sup
+    }));
+
+    const prompt = `Sos un arquitecto experto en diseno residencial en Argentina (Escobar y Tigre, GBA).
+Tu tarea es interpretar el pedido del cliente y distribuir los ambientes dentro del lote.
+
+LOTE:
+- Frente: ${frente}m, Fondo: ${fondo}m
+- Area edificable: desde x=${retLat}m hasta x=${(frente - retLat).toFixed(2)}m, desde y=${retFr}m hasta y=${(fondo - retFo).toFixed(2)}m
+- Orientacion frente: ${lote.orientacion || "N"}
+
+NORMATIVA (${normativa.municipio}${normativa.barrio ? " - " + normativa.barrio : ""}):
+- FOS max: ${normativa.fos_max}, FOT max: ${normativa.fot_max}
+- Retiros: Fr ${normativa.retiro_frente}m, Fo ${normativa.retiro_fondo}m, Lat ${normativa.retiro_lateral}m
+- Iluminacion L/${normativa.coef_ilum?.replace("L/","") || 8}, Ventilacion L/${normativa.coef_vent?.replace("L/","") || 3}
+
+${ambientesExistentes.length > 0 ? `AMBIENTES YA CARGADOS (usa estas superficies como base):
+${ambientesExistentes.map(a => `- ${a.nombre}: ${a.superficie}m2 (${a.planta}, ${a.tipo_sup})`).join("\n")}` : ""}
+
+PEDIDO DEL CLIENTE (puede venir de audio transcripto, interpreta con criterio arquitectonico):
+"""
+${brief || "Casa residencial estandar para familia"}
+"""
+
+Reglas de distribucion:
+1. Todos los ambientes deben estar dentro del area edificable
+2. Orienta dormitorios y living hacia el frente o patio segun la orientacion
+3. Cocina y banos pueden ir al fondo o con ventilacion por conducto
+4. No superpongas ambientes (verifica que no se pisen)
+5. Respeta el FOS (superficie cubierta / sup lote <= ${normativa.fos_max})
+
+Responde UNICAMENTE con un array JSON, sin texto antes ni despues, sin backticks.
+Formato de cada elemento:
+{"id": <numero unico>, "nombre": "<nombre>", "tipo": "<id de AMBIENTES_TIPOS>", "x": <metros>, "y": <metros>, "w": <ancho metros>, "h": <profundidad metros>, "tipo_sup": "cubierta|semicubierta|descubierta"}
+
+Tipos validos: dormitorio, dormPpal, estar, comedor, estudio, cocina, bano, lavadero, vestidor, garage, hall, toilette, deposito, semicub, pileta
+
+El array completo:`;
+
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 2000,
+          messages: [{ role: "user", content: prompt }]
+        })
+      });
+      const data = await res.json();
+      const txt = data.content?.find(b => b.type === "text")?.text || "";
+      const clean = txt.replace(/```json|```/g, "").trim();
+      const positions = JSON.parse(clean);
+
+      if (!Array.isArray(positions) || positions.length === 0) throw new Error("Respuesta invalida");
+
+      const newHabs = positions.map((p, i) => ({
+        id: p.id || Date.now() + i,
+        nombre: p.nombre || "Ambiente",
+        tipo: p.tipo || "hall",
+        x: +parseFloat(p.x).toFixed(2),
+        y: +parseFloat(p.y).toFixed(2),
+        w: +parseFloat(p.w).toFixed(2),
+        h: +parseFloat(p.h).toFixed(2),
+        tipo_sup: p.tipo_sup || "cubierta",
+      }));
+
+      saveHabs(newHabs);
+      setAiLog(`OK — ${newHabs.length} ambientes distribuidos.`);
+      setTab("esquema");
+    } catch (e) {
+      setAiError("No se pudo interpretar el brief. Revisa que tenga frente y fondo del lote cargados.");
+      setAiLog("");
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  // ── Export DXF ──
+  const exportarDXF = () => {
+    const dxf = generarDXF(proj, municipios, habs);
+    const blob = new Blob([dxf], { type: "application/dxf" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href = url;
+    a.download = (proj.nombre || "plano").replace(/\s+/g, "_") + "_MUNICIPAL.dxf";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // ── Resize ──
+  const resizeHab = (id, dim, delta) => {
+    const newHabs = habs.map(h => h.id !== id ? h : { ...h, [dim]: +Math.max(1, (h[dim] || 3) + delta).toFixed(2) });
+    saveHabs(newHabs);
+  };
+
+  if (!frente || !fondo) {
+    return (
+      <Card style={{ marginBottom: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 18 }}>🗺</span>
+          <div>
+            <div style={{ color: "#e2e8f0", fontWeight: 700, fontSize: 13 }}>Brief + Implantación</div>
+            <div style={{ color: "#475569", fontSize: 11, marginTop: 2 }}>Completá el frente y fondo del lote para activar.</div>
+          </div>
+        </div>
+      </Card>
+    );
+  }
+
+  const selH = habs.find(h => h.id === selHab);
+  const TabBtn = ({ id, label }) => (
+    <button onClick={() => setTab(id)} style={{ padding: "7px 16px", borderRadius: 6, border: "none", background: tab === id ? "#1a2a40" : "none", color: tab === id ? "#93c5fd" : "#475569", cursor: "pointer", fontSize: 12, fontWeight: tab === id ? 700 : 400 }}>{label}</button>
+  );
+
+  return (
+    <Card style={{ marginBottom: 16 }}>
+      {/* Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 18 }}>🗺</span>
+          <span style={{ color: "#e2e8f0", fontWeight: 800, fontSize: 14 }}>Brief + Implantación</span>
+          <Badge color="#475569">{frente}m × {fondo}m</Badge>
+          {barrio && <Badge color="#f59e0b">Ret: {retFr}/{retFo}/{retLat}m</Badge>}
+        </div>
+        <Btn size="sm" variant="green" onClick={exportarDXF}>⬇ Exportar DXF</Btn>
+      </div>
+
+      {/* Tabs */}
+      <div style={{ display: "flex", gap: 4, background: "#111d2e", borderRadius: 7, padding: 3, marginBottom: 16, width: "fit-content" }}>
+        <TabBtn id="brief"   label="🎙 Brief" />
+        <TabBtn id="esquema" label="📐 Esquema" />
+      </div>
+
+      {/* ── TAB BRIEF ── */}
+      {tab === "brief" && (
+        <div>
+          <div style={{ color: "#94a3b8", fontSize: 12, marginBottom: 10, lineHeight: 1.5 }}>
+            Describí el proyecto en texto libre. Puede ser un audio transcripto. La IA interpreta y distribuye los ambientes automáticamente.
+          </div>
+          <textarea
+            value={brief}
+            onChange={e => saveBrief(e.target.value)}
+            placeholder={`Ejemplos:\n• "Casa planta baja, tres dormitorios, uno en suite, cocina comedor integrada, lavadero, garage doble, patio atrás con pileta"\n• "Quiero living grande orientado al jardín, cocina separada pero comunicada, dos baños completos, dormitorio principal con vestidor, los otros dos más chicos para los chicos"\n• "Planta baja y primera. Abajo social, arriba privado. Abajo: living, comedor, cocina, toilette, lavadero. Arriba: 3 dormitorios, 2 baños"`}
+            style={{
+              width: "100%", minHeight: 140, background: "#0f1724", border: "1px solid #2d3f5a",
+              borderRadius: 10, padding: "12px 14px", color: "#e2e8f0", fontSize: 13,
+              lineHeight: 1.6, resize: "vertical", outline: "none", boxSizing: "border-box",
+              fontFamily: "inherit",
+            }}
+          />
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12 }}>
+            <div style={{ color: "#334155", fontSize: 11 }}>
+              {brief.length > 0 ? `${brief.length} caracteres` : "Sin brief todavía"}
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Btn size="sm" variant="ghost" onClick={autoLayout}>⚡ Layout automático</Btn>
+              <Btn size="sm" onClick={interpretarIA} disabled={aiLoading || !brief.trim()}>
+                {aiLoading ? "⏳ Interpretando..." : "🤖 Interpretar y distribuir"}
+              </Btn>
+            </div>
+          </div>
+          {aiLog && (
+            <div style={{ marginTop: 10, padding: "8px 12px", background: "#22c55e11", border: "1px solid #22c55e33", borderRadius: 7, color: "#86efac", fontSize: 12 }}>
+              {aiLog}
+            </div>
+          )}
+          {aiError && (
+            <div style={{ marginTop: 10, padding: "8px 12px", background: "#ef444411", border: "1px solid #ef444433", borderRadius: 7, color: "#f87171", fontSize: 12 }}>
+              {aiError}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── TAB ESQUEMA ── */}
+      {tab === "esquema" && (
+        <div>
+          <div style={{ background: "#0a1420", borderRadius: 10, padding: 8, overflow: "auto", marginBottom: 12 }}>
+            <svg
+              width={CANVAS_W} height={CANVAS_H}
+              style={{ display: "block", cursor: dragging ? "grabbing" : "default" }}
+              onMouseMove={onMouseMove}
+              onMouseUp={onMouseUp}
+              onMouseLeave={onMouseUp}
+            >
+              {/* Grid */}
+              {Array.from({ length: Math.ceil(frente) + 1 }, (_, i) => (
+                <line key={"gx"+i} x1={toSX(i)} y1={PAD} x2={toSX(i)} y2={PAD + fondo * scale} stroke="#1a2640" strokeWidth={0.5} />
+              ))}
+              {Array.from({ length: Math.ceil(fondo) + 1 }, (_, i) => (
+                <line key={"gy"+i} x1={PAD} y1={toSY(i)} x2={PAD + frente * scale} y2={toSY(i)} stroke="#1a2640" strokeWidth={0.5} />
+              ))}
+
+              {/* Lote */}
+              <rect x={toSX(0)} y={toSY(fondo)} width={m2px(frente)} height={m2px(fondo)} fill="#111d2e" stroke="#3b82f6" strokeWidth={2} />
+
+              {/* Area edificable */}
+              <rect x={toSX(retLat)} y={toSY(fondo - retFr)} width={m2px(frente - retLat * 2)} height={m2px(fondo - retFr - retFo)}
+                fill="#22c55e07" stroke="#22c55e66" strokeWidth={1} strokeDasharray="5,3" />
+
+              {/* Labels retiros */}
+              <text x={toSX(frente / 2)} y={toSY(fondo) + m2px(retFr) / 2 + 5} textAnchor="middle" fill="#22c55e99" fontSize={9}>ret. fr. {retFr}m</text>
+              <text x={toSX(frente / 2)} y={toSY(retFo) - 5} textAnchor="middle" fill="#22c55e99" fontSize={9}>ret. fo. {retFo}m</text>
+
+              {/* Cotas */}
+              <line x1={toSX(0)} y1={toSY(0) + 18} x2={toSX(frente)} y2={toSY(0) + 18} stroke="#475569" strokeWidth={1} />
+              <text x={toSX(frente / 2)} y={toSY(0) + 30} textAnchor="middle" fill="#64748b" fontSize={10} fontWeight="bold">{frente} m</text>
+              <line x1={toSX(frente) + 18} y1={toSY(fondo)} x2={toSX(frente) + 18} y2={toSY(0)} stroke="#475569" strokeWidth={1} />
+              <text x={toSX(frente) + 30} y={toSY(fondo / 2)} textAnchor="middle" fill="#64748b" fontSize={10} fontWeight="bold"
+                transform={`rotate(-90,${toSX(frente) + 30},${toSY(fondo / 2)})`}>{fondo} m</text>
+
+              {/* Norte */}
+              <text x={PAD - 26} y={PAD + 6} fill="#f59e0b" fontSize={14} fontWeight="bold">N</text>
+              <line x1={PAD - 18} y1={PAD + 8} x2={PAD - 18} y2={PAD + 22} stroke="#f59e0b" strokeWidth={2} />
+
+              {/* Habitaciones */}
+              {habs.map(h => {
+                const sx = toSX(h.x), sy = toSY(h.y + h.h);
+                const sw = m2px(h.w), sh = m2px(h.h);
+                const col = CAT_COLOR(h.tipo);
+                const isSel = selHab === h.id;
+                return (
+                  <g key={h.id} style={{ cursor: "grab" }} onMouseDown={e => onMouseDown(e, h.id)}>
+                    <rect x={sx} y={sy} width={sw} height={sh}
+                      fill={col + (h.tipo_sup === "semicubierta" ? "22" : "33")}
+                      stroke={isSel ? "#ffffff" : col}
+                      strokeWidth={isSel ? 2.5 : 1.5}
+                      strokeDasharray={h.tipo_sup === "semicubierta" ? "5,3" : "none"}
+                    />
+                    <text x={sx + sw / 2} y={sy + sh / 2 - (sw > 40 ? 5 : 2)} textAnchor="middle" fill="#e2e8f0"
+                      fontSize={Math.max(7, Math.min(11, sw / Math.max(h.nombre.length, 6) * 1.5))} fontWeight="600" style={{ pointerEvents: "none" }}>
+                      {h.nombre.length > 16 ? h.nombre.slice(0, 14) + "…" : h.nombre}
+                    </text>
+                    {sh > 28 && (
+                      <text x={sx + sw / 2} y={sy + sh / 2 + 10} textAnchor="middle" fill={col} fontSize={8} style={{ pointerEvents: "none" }}>
+                        {(h.w * h.h).toFixed(1)} m²
+                      </text>
+                    )}
+                  </g>
+                );
+              })}
+            </svg>
+          </div>
+
+          {/* Panel edicion habitacion seleccionada */}
+          {selH && (
+            <div style={{ background: "#0d1624", border: "1px solid #2d3f5a", borderRadius: 8, padding: 12, marginBottom: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <span style={{ color: CAT_COLOR(selH.tipo), fontWeight: 700, fontSize: 13 }}>{selH.nombre}</span>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <span style={{ color: "#475569", fontSize: 11 }}>{(selH.w * selH.h).toFixed(2)} m²</span>
+                  <button onClick={() => { saveHabs(habs.filter(h => h.id !== selH.id)); setSelHab(null); }}
+                    style={{ background: "#2d1a1a", border: "1px solid #7f1d1d", borderRadius: 5, color: "#f87171", cursor: "pointer", padding: "3px 8px", fontSize: 11 }}>Eliminar</button>
+                  <button onClick={() => setSelHab(null)} style={{ background: "none", border: "none", color: "#475569", cursor: "pointer", fontSize: 14 }}>✕</button>
+                </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10 }}>
+                {[{ label: "X (m)", dim: "x" }, { label: "Y (m)", dim: "y" }, { label: "Ancho (m)", dim: "w" }, { label: "Prof. (m)", dim: "h" }].map(({ label, dim }) => (
+                  <div key={dim}>
+                    <div style={{ color: "#475569", fontSize: 9, fontWeight: 700, textTransform: "uppercase", marginBottom: 3 }}>{label}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                      <button onClick={() => resizeHab(selH.id, dim, -0.1)} style={{ background: "#1a2235", border: "1px solid #2d3f5a", borderRadius: 4, color: "#94a3b8", padding: "3px 8px", cursor: "pointer", fontSize: 14, lineHeight: 1 }}>−</button>
+                      <span style={{ color: "#e2e8f0", fontSize: 12, fontWeight: 700, minWidth: 34, textAlign: "center" }}>{selH[dim]}</span>
+                      <button onClick={() => resizeHab(selH.id, dim, 0.1)} style={{ background: "#1a2235", border: "1px solid #2d3f5a", borderRadius: 4, color: "#94a3b8", padding: "3px 8px", cursor: "pointer", fontSize: 14, lineHeight: 1 }}>+</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Botones accion */}
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            <Btn size="sm" variant="ghost" onClick={autoLayout}>⚡ Auto-layout</Btn>
+            <Btn size="sm" variant="ghost" onClick={() => { setTab("brief"); }}>🎙 Editar brief</Btn>
+            <Btn size="sm" variant="green" onClick={exportarDXF}>⬇ Exportar DXF para AutoCAD</Btn>
+          </div>
+
+          {/* Leyenda */}
+          <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+            {[["#3b82f6","1° Cat (dormir/estar)"],["#8b5cf6","2° Cat (cocina/baño)"],["#475569","3° Cat (hall/depósito)"]].map(([c,l]) => (
+              <div key={l} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                <div style={{ width: 10, height: 10, background: c + "33", border: "1px solid " + c, borderRadius: 2 }} />
+                <span style={{ color: "#475569", fontSize: 10 }}>{l}</span>
+              </div>
+            ))}
+            <span style={{ color: "#334155", fontSize: 10, marginLeft: "auto" }}>Arrastrá ambientes · Click para editar</span>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+};
+
 // ── SIDEBAR ───────────────────────────────────────────────────────────────────
 const Sidebar = ({ view, setView, onExport, onImport, isMobile, sidebarOpen, onCloseSidebar }) => {
   if (isMobile && !sidebarOpen) return null;
@@ -1409,6 +1944,7 @@ const HomeView = ({ projects, setProjects, municipios, setView, onOpenObra, isMo
               )}
             </Card>
             <LoteCard proj={proj} setProjects={setProjects} />
+            <ImplantacionCard proj={proj} setProjects={setProjects} municipios={municipios} />
             <VerificacionCard proj={proj} municipios={municipios} />
             <PlanillaCard proj={proj} municipios={municipios} />
             <FilesCard proj={proj} setProjects={setProjects} />
