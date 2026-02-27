@@ -1466,7 +1466,12 @@ El array completo:`;
     try {
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": getApiKey(),
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514",
           max_tokens: 2000,
@@ -1810,7 +1815,12 @@ Reglas importantes:
     try {
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": getApiKey(),
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514",
           max_tokens: 2000,
@@ -2003,6 +2013,7 @@ const Sidebar = ({ view, setView, onExport, onImport, isMobile, sidebarOpen, onC
         { id: "nuevo",     label: "Nuevo plano",  icon: "＋" },
         { id: "obras",     label: "Dir. de Obra", icon: "🏗" },
         { id: "normativa", label: "Normativa",    icon: "🗺️" },
+        { id: "settings",  label: "Configuración", icon: "⚙️" },
       ].map(item => (
         <button key={item.id} onClick={() => nav(item.id)} style={{
           display: "flex", alignItems: "center", gap: 9, width: "100%", padding: "10px 13px",
@@ -3284,6 +3295,8 @@ const ObrasListView = ({ projects, setProjects, onOpenObra, isMobile }) => {
 };
 
 // ── APP ───────────────────────────────────────────────────────────────────────
+const getApiKey = () => localStorage.getItem("planomuni_apikey") || "";
+
 export default function App() {
   const isMobile = useIsMobile();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -3357,6 +3370,27 @@ export default function App() {
         {view === "home" && obraProject && obraProject.obra?.activo && <ObraView project={obraProject} setProjects={setProjects} onBack={() => setObraProjectId(null)} isMobile={isMobile} />}
         {view === "obras" && !obraProject && <ObrasListView projects={projects} setProjects={setProjects} onOpenObra={(pid) => setObraProjectId(pid)} isMobile={isMobile} />}
         {view === "obras" && obraProject && obraProject.obra?.activo && <ObraView project={obraProject} setProjects={setProjects} onBack={() => setObraProjectId(null)} isMobile={isMobile} />}
+        {view === "settings" && (
+          <div style={{ flex: 1, overflow: "auto", padding: 28, maxWidth: 500 }}>
+            <h1 style={{ color: "#e2e8f0", fontSize: 19, fontWeight: 900, margin: "0 0 6px" }}>⚙️ Configuración</h1>
+            <p style={{ color: "#475569", fontSize: 13, margin: "0 0 24px" }}>Ajustes de la aplicación</p>
+            <div style={{ background: "#111d2e", border: "1px solid #1a2640", borderRadius: 12, padding: 20, marginBottom: 16 }}>
+              <div style={{ color: "#e2e8f0", fontWeight: 700, fontSize: 14, marginBottom: 4 }}>🔑 API Key de Anthropic</div>
+              <div style={{ color: "#475569", fontSize: 12, marginBottom: 12, lineHeight: 1.5 }}>
+                Necesaria para el Asistente de diseño y la distribución con IA.<br/>
+                Conseguila en <a href="https://console.anthropic.com" target="_blank" rel="noopener noreferrer" style={{ color: "#3b82f6" }}>console.anthropic.com</a> → API Keys.
+              </div>
+              <input
+                type="password"
+                defaultValue={getApiKey()}
+                placeholder="sk-ant-..."
+                onChange={e => localStorage.setItem("planomuni_apikey", e.target.value)}
+                style={{ width: "100%", background: "#0f1724", border: "1px solid #2d3f5a", borderRadius: 8, padding: "10px 13px", color: "#e2e8f0", fontSize: 13, boxSizing: "border-box", outline: "none" }}
+              />
+              {getApiKey() && <div style={{ color: "#22c55e", fontSize: 11, marginTop: 8 }}>✅ API Key guardada</div>}
+            </div>
+          </div>
+        )}
         {view === "nuevo" && <NuevoView municipios={municipios} setView={setView} setProjects={setProjects} isMobile={isMobile} />}
         {view === "normativa" && <NormativaView municipios={municipios} setMunicipios={setMunicipios} isMobile={isMobile} />}
       </div>
